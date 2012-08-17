@@ -1,4 +1,8 @@
 <?php
+// ovhmail-password - Manage your OVH mails
+// Licence: http://www.opensource.org/licenses/zlib-license.php
+// Requires: php 5
+
 require_once(dirname(__FILE__).'/config.php');
 
 $errors = array();
