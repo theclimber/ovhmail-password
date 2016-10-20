@@ -4,6 +4,9 @@
 // Requires: php 5
 
 require_once(dirname(__FILE__).'/config.php');
+if($method == "apiv6") {
+	require __DIR__ . '/vendor/autoload.php';
+}
 
 $errors = array();
 $passwordmail = '';
@@ -20,13 +23,12 @@ $email = $email_name . $dom;
 $mbox = @imap_open('{'.$serveur.':143}INBOX', "$email", "$passwordmail");
 if (!$mbox) {
 	if (!empty($_POST)) {
-		$errors[] = "Authentication error";
+		$errors[] = "Authentication error";//.imap_last_error();
 	}
 	$need_login = true;
 } else {
 	imap_close($mbox);
 	// Filtrage des données
-
 	foreach ($_REQUEST as $key => $val) {
 		$val = preg_replace("/[\'\"\\\?\~]/i",'', $val);
 		$_REQUEST[$key] = $val;
@@ -42,45 +44,64 @@ if (!$mbox) {
 	}
 
 	$success = '';
-	if (strlen($newpass) >= 8 && $newpass == $newpass2 && $_POST["newpass"]==$newpass) {
+	$minLength = 0;
+	$maxLength = 0;
+	if($method == "apiv6" || $method == "soapi") {
+		$minLength = $passwordLength[$method]["min"];
+		$maxLength = $passwordLength[$method]["max"];
+	} else {
+		$errors[] = "The configuration is incorrect. Please contact your administrator.";
+	}
+	if (empty($errors) && strlen($newpass) >= $minLength && strlen($newpass) <= $maxLength && $newpass == $newpass2 && $_POST["newpass"]==$newpass) {
 	// Vérification du bon nouveau mot de passe (avec les deux champs puis on valide si ok )
-		$soap = new SoapClient('https://www.ovh.com/soapi/soapi-1.2.wsdl');
+		$successMsg = "<h3>Your password is being changed. The operation will take effect in 5 to 10 minutes.</h3>";
+		switch($method) {
+			case "soapi":
+				$soap = new SoapClient('https://www.ovh.com/soapi/soapi-1.2.wsdl');
 
-		//login
-		try {
-			$language = null;
-			$multisession = false;
-			$session = $soap->login($nic,$pass,$language,$multisession);
-			//$success .= "login successfull<br/>";
-		} catch(SoapFault $fault) {
-			$errors[] = "Error : login";//.$fault;
-		}
-		//popModifyPassword
-		try {
-			$result = $soap->popModifyPassword($session, $domain, $email_name, $newpass, false);
-			//$success .= "popModifyPassword successfull<br/>";
-			//$success .= print_r($result);
-			//$success .= "<br/>";
-			$success .= "<h3>Thank you.<br />Password has been modified.</h3>";
-			$success .= "<h3>The change will be visible maximally in 15 minutes.</h3>";
-		} catch(SoapFault $fault) {
-			$errors[] = "Error : popModifyPassword";//.$fault;.$fault;
-		}
-		//logout
-		try {
-			$result = $soap->logout($session);
-			//$success .= "logout successfull<br/>";
-		} catch(SoapFault $fault) {
-			$errors[] = "Error : logout";//.$fault;.$fault;
+				//login
+				try {
+					$language = null;
+					$multisession = false;
+					$session = $soap->login($nic,$pass,$language,$multisession);
+				} catch(SoapFault $fault) {
+					$errors[] = "Error : login";//.$fault;
+				}
+				//popModifyPassword
+				try {
+					$result = $soap->popModifyPassword($session, $domain, $email_name, $newpass, false);
+					$success = $successMsg;
+				} catch(SoapFault $fault) {
+					$errors[] = "Error : popModifyPassword";//.$fault;
+				}
+				//logout
+				try {
+					$result = $soap->logout($session);
+
+				} catch(SoapFault $fault) {
+					$errors[] = "Error : logout";//.$fault;
+				}
+				break;
+			case "apiv6":
+				try {
+					$ovh = new \Ovh\Api( $appKey, $appSecret, $apiEndpoint, $consumerKey);
+					$result = $ovh->post("/email/domain/$domain/account/$email_name/changePassword", array(
+					    'password' => $newpass
+					));
+					$success = $successMsg;
+				} catch(Exception $fault) {
+					$errors[] = "An error occured during passwor change attempt.";//.$fault;
+				}
+				break;
 		}
 	} elseif (strlen($newpass) > 0 && $newpass != $newpass2) {
 	// ici le cas ou le premier nouveau mot de passe ne correspond pas au second
 		$errors[] = "The two passwords are not equal, please check it";
-	} elseif (strlen($newpass) > 0 && strlen($newpass) < 8) {
-	// Si le mot de passe fait moins de 8 caractères on refuse 
-		$errors[] = "Make sure your password has minimum 8 characters.";
+	} elseif (strlen($newpass) > 0 && (strlen($newpass) < $minLength || strlen($newpass) > $maxLength)) {
+	// Si le mot de passe fait moins de x caractères ou plus de y caractères on refuse
+		$errors[] = "Make sure your password length is between $minLength and $maxLength characters.";
 	} elseif ($_POST["newpass"]!=$newpass) {
-	// Si le mot de passe fait moins de 8 caractères on refuse 
+	// Si le mot de passe contient des caractères invalides on refuse
 		$errors[] = "Password contains one or more of invalid characters:<ul><li>\'</li><li>\"</li><li>\\</li><li>\?</li><li>\~</li></ul>";
 	}
 }
