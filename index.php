@@ -5,6 +5,9 @@
 
 require_once(dirname(__FILE__).'/config.php');
 
+require __DIR__ . '/vendor/autoload.php';
+use \Ovh\Api;
+
 $errors = array();
 $passwordmail = '';
 $email_name = '';
@@ -44,35 +47,37 @@ if (!$mbox) {
 	$success = '';
 	if (strlen($newpass) >= 8 && $newpass == $newpass2 && $_POST["newpass"]==$newpass) {
 	// Vérification du bon nouveau mot de passe (avec les deux champs puis on valide si ok )
-		$soap = new SoapClient('https://www.ovh.com/soapi/soapi-1.2.wsdl');
+        $ovh = new Api( $applicationKey,  // Application Key
+                        $applicationSecret,  // Application Secret
+                        'ovh-eu',      // Endpoint of API OVH Europe (List of available endpoints)
+                        $consumerKey); // Consumer Key
 
-		//login
-		try {
-			$language = null;
-			$multisession = false;
-			$session = $soap->login($nic,$pass,$language,$multisession);
-			//$success .= "login successfull<br/>";
-		} catch(SoapFault $fault) {
-			$errors[] = "Error : login";//.$fault;
-		}
-		//popModifyPassword
-		try {
-			$result = $soap->popModifyPassword($session, $domain, $email_name, $newpass, false);
-			//$success .= "popModifyPassword successfull<br/>";
-			//$success .= print_r($result);
-			//$success .= "<br/>";
-			$success .= "<h3>Thank you.<br />Password has been modified.</h3>";
-			$success .= "<h3>The change will be visible maximally in 15 minutes.</h3>";
-		} catch(SoapFault $fault) {
-			$errors[] = "Error : popModifyPassword";//.$fault;.$fault;
-		}
-		//logout
-		try {
-			$result = $soap->logout($session);
-			//$success .= "logout successfull<br/>";
-		} catch(SoapFault $fault) {
-			$errors[] = "Error : logout";//.$fault;.$fault;
-		}
+        try {
+            $result = $ovh->get("/email/domain/${domain}/account/${email_name}");
+            if (!$result) {
+                $errors[] = "Cannot access to account";
+            }
+            else {
+                if ($result['isBlocked']) {
+                    $errors[] = "Account is blocked";
+                }
+                else {
+                    $result = $ovh->post("/email/domain/${domain}/account/${email_name}/changePassword", array(
+                        'password' => $newpass
+                    ));
+                    if (!$result || !isset($result['id'])) {
+                        $errors[] = "Error while creating change password task";
+                    $errors[] = print_r($result, true);
+                    }
+                    else {
+                        $success .= "<h3>Thank you.<br />Password has been modified.</h3>";
+                        $success .= "<h3>The change will be visible maximally in 15 minutes.</h3>";
+                    }
+                }
+            }
+        } catch (Exception $ex) {
+            $errors[] = "API Error: " . $ex->getMessage();
+        }
 	} elseif (strlen($newpass) > 0 && $newpass != $newpass2) {
 	// ici le cas ou le premier nouveau mot de passe ne correspond pas au second
 		$errors[] = "The two passwords are not equal, please check it";
